@@ -1,6 +1,6 @@
 import Groq from "groq-sdk";
-import { OpponentArchetype } from "./OpponentProfile";
-import { DifficultyController } from "./DifficultyController";
+import { OpponentArchetype } from "./OpponentProfile.js";
+import { DifficultyController } from "./DifficultyController.js";
 
 // Helper to sanitize JSON response from Gemini/Groq
 function cleanJSONString(rawText: string): string {
