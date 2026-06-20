@@ -2,9 +2,9 @@ import express, { Request, Response } from "express";
 import path from "path";
 import dotenv from "dotenv";
 import Groq from "groq-sdk";
-import { getArchetypeForDifficulty } from "./server/opponent/OpponentProfile";
-import { OpponentEngine } from "./server/opponent/OpponentEngine";
-import { MatchFeedback } from "./server/opponent/MatchFeedback";
+import { getArchetypeForDifficulty } from "./server/opponent/OpponentProfile.js";
+import { OpponentEngine } from "./server/opponent/OpponentEngine.js";
+import { MatchFeedback } from "./server/opponent/MatchFeedback.js";
 dotenv.config();
 
 const app = express();
