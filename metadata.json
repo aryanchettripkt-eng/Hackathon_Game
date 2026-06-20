@@ -1,0 +1,6 @@
+{
+  "name": "Adversarial Algorithm Arena",
+  "description": "A competitive PvP learning battleground where developers write algorithms, swap codebases, hunt for flaws in opponent code, and survive AI validation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
