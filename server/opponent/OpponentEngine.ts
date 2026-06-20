@@ -36,6 +36,17 @@ export class OpponentEngine {
       numFlaws = 1;
     }
 
+    const flawThemes = [
+      "off-by-one errors in loops",
+      "inefficient O(n^2) nested loops instead of O(n)",
+      "missing null or empty array checks",
+      "improper handling of negative numbers",
+      "ignoring standard boundary cases",
+      "using wrong variable in inner loop",
+      "memory leaks by unnecessary array duplication"
+    ];
+    const randomTheme = flawThemes[Math.floor(Math.random() * flawThemes.length)];
+
     const prompt = `You are playing the role of an AI coding opponent named "${archetype.name}" in the "Adversarial Algorithm Arena".
 Your task is to write a solution for the following problem in ${language}:
 Title: ${problemTitle}
@@ -48,6 +59,7 @@ Opponent Profile:
 
 INSTRUCTIONS:
 You MUST write a functional-looking solution, BUT you must intentionally inject EXACTLY ${numFlaws} subtle flaw(s)/bug(s) into the code based on your typical mistakes. 
+To keep things interesting, focus on this specific theme for the flaw(s): "${randomTheme}".
 If ${numFlaws} is 0, write a perfect optimal solution.
 Do NOT leave comments indicating where the flaw is. Make it look like a genuine human mistake.
 
