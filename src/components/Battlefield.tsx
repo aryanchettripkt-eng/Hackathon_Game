@@ -206,6 +206,8 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
           language: preferredLang,
           problemId: problem?.id,
           problemTitle: problem?.title,
+          problemDescription: problem?.description,
+          examples: problem?.examples,
           difficulty: problem?.difficulty
         })
       });
@@ -243,6 +245,7 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
         body: JSON.stringify({
           problemTitle: problem?.title,
           problemDescription: problem?.description,
+          examples: problem?.examples,
           language: preferredLang,
           difficulty: problem?.difficulty
         })
@@ -257,14 +260,18 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
       
       if (data.opponent) setOpponentProfile(data.opponent);
       
-      setOpponentAnalysis({
-        correctnessScore: 45,
-        efficiencyScore: 18,
-        robustnessScore: 15,
-        totalScore: 78,
-        timeComplexity: preferredLang === "javascript" ? "O(N^2)" : "O(N log N)",
-        spaceComplexity: "O(N)"
-      });
+      if (data.analysis) {
+        setOpponentAnalysis(data.analysis);
+      } else {
+        setOpponentAnalysis({
+          correctnessScore: 45,
+          efficiencyScore: 18,
+          robustnessScore: 15,
+          totalScore: 78,
+          timeComplexity: preferredLang === "javascript" ? "O(N^2)" : "O(N log N)",
+          spaceComplexity: "O(N)"
+        });
+      }
 
       setTimeout(() => {
         setLoading(false);

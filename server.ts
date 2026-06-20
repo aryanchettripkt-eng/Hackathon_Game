@@ -433,7 +433,7 @@ Note: Limit explanations. Return only valid, compilable JSON.`;
  * Checks for correctness, efficiency, robustness, time/space complexity, and highlights vulnerabilities.
  */
 app.post("/api/analyze-builder", async (req: Request, res: Response) => {
-  const { code, language, problemId, problemTitle, difficulty } = req.body;
+  const { code, language, problemId, problemTitle, problemDescription, examples, difficulty } = req.body;
 
   if (!code || code.trim().length === 0) {
     return res.status(400).json({ error: "Code cannot be empty" });
@@ -482,7 +482,7 @@ app.post("/api/analyze-builder", async (req: Request, res: Response) => {
 
   try {
     const report = await OpponentEngine.analyzePlayerCode(
-      ai, code, problemTitle, language, archetype, difficulty || "Intermediate"
+      ai, code, problemTitle, problemDescription, examples, language, archetype, difficulty || "Intermediate"
     );
     res.json({ ...report, opponent: archetype });
   } catch (error) {
@@ -511,14 +511,22 @@ app.post("/api/analyze-builder", async (req: Request, res: Response) => {
  * API Endpoint: Generate Opponent's Solution
  */
 app.post("/api/opponent/generate", async (req: Request, res: Response) => {
-  const { problemTitle, problemDescription, language, difficulty } = req.body;
+  const { problemTitle, problemDescription, examples, language, difficulty } = req.body;
   const archetype = getArchetypeForDifficulty(difficulty || "Intermediate");
   
   if (!ai) {
     return res.json({
       opponent: archetype,
       code: "// Mock opponent fallback code",
-      intendedFlaws: []
+      intendedFlaws: [],
+      analysis: {
+        correctnessScore: 45,
+        efficiencyScore: 18,
+        robustnessScore: 15,
+        totalScore: 78,
+        timeComplexity: "O(N log N)",
+        spaceComplexity: "O(N)"
+      }
     });
   }
 
@@ -526,7 +534,12 @@ app.post("/api/opponent/generate", async (req: Request, res: Response) => {
     ai, problemTitle, problemDescription, language, archetype, difficulty || "Intermediate"
   );
   
-  res.json({ opponent: archetype, code, intendedFlaws });
+  // Now grade the opponent's generated code using the EXACT same AI grading system as the builder
+  const analysis = await OpponentEngine.analyzePlayerCode(
+    ai, code, problemTitle, problemDescription, examples, language, archetype, difficulty || "Intermediate"
+  );
+  
+  res.json({ opponent: archetype, code, intendedFlaws, analysis });
 });
 
 /**
