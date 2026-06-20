@@ -6,9 +6,7 @@ import Groq from "groq-sdk";
 dotenv.config();
 
 const app = express();
-if (!process.env.VERCEL) {
-  app.use(express.json());
-}
+app.use(express.json());
 
 const PORT = 3000;
 
