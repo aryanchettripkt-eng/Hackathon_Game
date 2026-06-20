@@ -434,7 +434,7 @@ Note: Limit explanations. Return only valid, compilable JSON.`;
  * Checks for correctness, efficiency, robustness, time/space complexity, and highlights vulnerabilities.
  */
 app.post("/api/analyze-builder", async (req: Request, res: Response) => {
-  const { code, language, problemId, problemTitle, difficulty } = req.body;
+  const { code, language, problemId, problemTitle, problemDescription, examples, difficulty } = req.body;
 
   if (!code || code.trim().length === 0) {
     return res.status(400).json({ error: "Code cannot be empty" });
@@ -483,7 +483,7 @@ app.post("/api/analyze-builder", async (req: Request, res: Response) => {
 
   try {
     const report = await OpponentEngine.analyzePlayerCode(
-      ai, code, problemTitle, language, archetype, difficulty || "Intermediate"
+      ai, code, problemTitle, problemDescription, examples, language, archetype, difficulty || "Intermediate"
     );
     res.json({ ...report, opponent: archetype });
   } catch (error) {

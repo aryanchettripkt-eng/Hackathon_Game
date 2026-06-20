@@ -82,6 +82,8 @@ Respond strictly in valid JSON format:
     ai: Groq,
     playerCode: string,
     problemTitle: string,
+    problemDescription: string,
+    examples: any[],
     language: string,
     archetype: OpponentArchetype,
     difficulty: string
@@ -90,6 +92,8 @@ Respond strictly in valid JSON format:
     
     const prompt = `You are an AI opponent named "${archetype.name}" reviewing the player's code in the "Adversarial Algorithm Arena".
 Problem: ${problemTitle}
+Description: ${problemDescription || "Solve the algorithmic challenge."}
+Examples/Tests: ${JSON.stringify(examples || [])}
 Language: ${language}
 Player Code:
 ${playerCode}
@@ -99,8 +103,12 @@ Opponent Profile:
 - Focus Area: ${archetype.focusArea}
 
 INSTRUCTIONS:
-Analyze the player's code for bugs, inefficiencies, and edge case failures.
-You are NOT an omniscient analyzer. You should primarily focus on your Focus Area: ${archetype.focusArea}.
+You must analyze the player's code and RATE it based on the following preestablished measurements:
+1. correctnessScore (0 to 50): Does the code actually solve the problem description and pass the examples? Deduct points heavily for logic bugs.
+2. efficiencyScore (0 to 25): Is the time/space complexity optimal for this problem? Deduct points for suboptimal big-O.
+3. robustnessScore (0 to 25): Does it handle edge cases (empty inputs, large bounds)? Deduct points if missing.
+
+Also, find bugs/inefficiencies based on your Focus Area: ${archetype.focusArea}.
 Based on your detection probability of ${breakerConfig.detectionProbability * 100}%, you might miss things.
 You can return a MAXIMUM of ${breakerConfig.likelyFindingsMax} weaknesses. If the code is perfect, return 0.
 For each weakness you find, assign a "confidenceScore" between 0 and 100 representing how sure you are.

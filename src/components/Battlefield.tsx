@@ -206,6 +206,8 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
           language: preferredLang,
           problemId: problem?.id,
           problemTitle: problem?.title,
+          problemDescription: problem?.description,
+          examples: problem?.examples,
           difficulty: problem?.difficulty
         })
       });
