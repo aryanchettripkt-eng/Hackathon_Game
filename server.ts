@@ -1,7 +1,6 @@
 import express, { Request, Response } from "express";
 import path from "path";
 import dotenv from "dotenv";
-import { createServer as createViteServer } from "vite";
 import Groq from "groq-sdk";
 import { getArchetypeForDifficulty } from "./server/opponent/OpponentProfile.js";
 import { OpponentEngine } from "./server/opponent/OpponentEngine.js";
@@ -712,6 +711,7 @@ Ensure the output is parseable JSON with no explanation or wrapping outside the 
 // Configure Vite in development as middleware
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
