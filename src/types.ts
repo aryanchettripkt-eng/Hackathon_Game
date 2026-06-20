@@ -9,6 +9,7 @@ export interface UserStats {
   username: string;
   builderRating: number;
   breakerRating: number;
+  analystRating: number;
   overallRating: number;
   winRate: number;
   winStreak: number;
@@ -55,12 +56,18 @@ export interface Finding {
   id: string;
   title: string;
   category: "logic_bug" | "timeout" | "memory_issue" | "security_concern" | "critical_failure" | "minor_edge_case";
+  findingType: string;
   description: string;
+  reasoningText: string;
+  confidenceLevel: "Low" | "Medium" | "High";
   exampleInput: string;
   expectedOutput: string;
   observedOutput: string;
   isValid?: boolean;
+  isDuplicate?: boolean;
   scoreAwarded?: number;
+  reasoningBonus?: number;
+  severity?: "Minor" | "Moderate" | "High" | "Critical";
   reasoning?: string;
   timestamp: string;
 }
@@ -83,6 +90,7 @@ export interface LeaderboardRow {
   overallRating: number;
   builderRating: number;
   breakerRating: number;
+  analystRating: number;
   tier: string;
   trend: "up" | "down" | "stable";
   winRate: number;
@@ -121,6 +129,8 @@ export interface LiveMatchState {
     defenceBonus: number;
     precisionBonus: number;
     spamPenalty: number;
+    falsePositivePenalty: number;
+    reasoningBonusTotal: number;
     finalBuilder: number;
     finalBreaker: number;
   } | null;
