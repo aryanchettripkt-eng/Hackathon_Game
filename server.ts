@@ -1,7 +1,6 @@
 import express, { Request, Response } from "express";
 import path from "path";
 import dotenv from "dotenv";
-import { createServer as createViteServer } from "vite";
 import Groq from "groq-sdk";
 import { getArchetypeForDifficulty } from "./server/opponent/OpponentProfile";
 import { OpponentEngine } from "./server/opponent/OpponentEngine";
@@ -712,6 +711,7 @@ Ensure the output is parseable JSON with no explanation or wrapping outside the 
 // Configure Vite in development as middleware
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -720,17 +720,21 @@ async function startServer() {
     console.log("Vite dev server mounted.");
   } else {
     // Production Mode: static file serving
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.use(express.static(path.join(process.cwd(), "dist")));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(process.cwd(), "dist/index.html"));
     });
-    console.log("Static production assets mounted.");
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, () => {
     console.log(`Adversarial Algorithm Arena running securely on port ${PORT}`);
   });
 }
 
-startServer();
+// Only start the server if we are not running on Vercel
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+// Export the Express app for Vercel Serverless Functions
+export default app;
