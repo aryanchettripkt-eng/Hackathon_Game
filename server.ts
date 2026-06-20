@@ -3,7 +3,9 @@ import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import Groq from "groq-sdk";
-
+import { getArchetypeForDifficulty } from "./server/opponent/OpponentProfile";
+import { OpponentEngine } from "./server/opponent/OpponentEngine";
+import { MatchFeedback } from "./server/opponent/MatchFeedback";
 dotenv.config();
 
 const app = express();
@@ -295,6 +297,13 @@ The user's chosen language is ${preferredLang || "python"}.
 
 The problem must have subtle edge cases.
 You MUST respond strictly in clean JSON format with zero extra text or commentary.
+
+CRITICAL REQUIREMENT FOR "templates":
+- The code templates for "python", "javascript", "cpp", and "java" must ONLY provide the function signature/boilerplate matching the LeetCode problem (appropriate function name, parameters, and basic return type).
+- DO NOT solve the problem in the templates! The template function bodies MUST NOT contain the solved code or correct algorithm.
+- The template function bodies must be empty or contain only a simple placeholder return statement (like returning 0, null, or empty array) and a comment like "// TODO: Implement solution".
+- Players must write the code themselves; pre-solved templates are strictly forbidden.
+
 The JSON must align with the following structure:
 {
   "title": "A highly styled cyberpunk name for the security/DSA problem based on the original title",
@@ -310,10 +319,10 @@ The JSON must align with the following structure:
     }
   ],
   "templates": {
-    "python": "def solve(data):\\n    return data",
-    "javascript": "function solve(data) {\\n    return data;\\n}",
-    "cpp": "int solve(int data) {\\n    return data;\\n}",
-    "java": "public class Solution {\\n    public int solve(int data) {\\n        return data;\\n    }\\n}"
+    "python": "def solve(data):\\n    # TODO: Implement\\n    return data",
+    "javascript": "function solve(data) {\\n    // TODO: Implement\\n    return data;\\n}",
+    "cpp": "int solve(int data) {\\n    // TODO: Implement\\n    return data;\\n}",
+    "java": "public class Solution {\\n    public int solve(int data) {\\n        // TODO: Implement\\n        return data;\\n    }\\n}"
   }
 }`;
 
@@ -421,15 +430,17 @@ Note: Limit explanations. Return only valid, compilable JSON.`;
 });
 
 /**
- * API Endpoint: Static analyzer and AI review proxy.
+ * API Endpoint: Static analyzer and AI review proxy (Breaker phase for Opponent).
  * Checks for correctness, efficiency, robustness, time/space complexity, and highlights vulnerabilities.
  */
 app.post("/api/analyze-builder", async (req: Request, res: Response) => {
-  const { code, language, problemId, problemTitle } = req.body;
+  const { code, language, problemId, problemTitle, difficulty } = req.body;
 
   if (!code || code.trim().length === 0) {
     return res.status(400).json({ error: "Code cannot be empty" });
   }
+
+  const archetype = getArchetypeForDifficulty(difficulty || "Intermediate");
 
   if (!ai) {
     // Generate beautiful realistic analysis for mock sandbox
@@ -447,12 +458,14 @@ app.post("/api/analyze-builder", async (req: Request, res: Response) => {
       {
         type: "Nested Loop Performance Hazard",
         severity: "Medium",
-        description: "The solution contains nested iterations that could degenerate into cubic runtime under extreme hacker bounds."
+        description: "The solution contains nested iterations that could degenerate into cubic runtime under extreme hacker bounds.",
+        confidenceScore: 85
       },
       {
         type: "Null Pointer/Undefined Boundary Negligence",
         severity: "High",
-        description: "Did not explicitly check for empty inputs or negative value boundaries before initializing variables."
+        description: "Did not explicitly check for empty inputs or negative value boundaries before initializing variables.",
+        confidenceScore: 92
       }
     ];
 
@@ -463,57 +476,18 @@ app.post("/api/analyze-builder", async (req: Request, res: Response) => {
       totalScore: totalBuilderScore,
       timeComplexity: timeComplex,
       spaceComplexity: spaceComplex,
-      weaknesses
+      weaknesses,
+      opponent: archetype
     });
   }
 
   try {
-    const prompt = `You are a senior algorithmic static analyzer and competitive advisor for the "Adversarial Algorithm Arena".
-Analyze the user's submitted code solving the problem: "${problemTitle || "DSA Challenge"}".
-
-Language: ${language}
-Submitted Code:
-${code}
-
-You must evaluate and return a strict JSON output representing the solution's performance profiles.
-The JSON must have this schema:
-{
-  "correctnessScore": number (0 to 50, standard DSA compliance score),
-  "efficiencyScore": number (0 to 25, based on performance scaling),
-  "robustnessScore": number (0 to 25, based on edge cases, exception safety, and input bounds),
-  "timeComplexity": "string representing Time Complexity (e.g., O(N log N))",
-  "spaceComplexity": "string representing Space Complexity (e.g., O(1) or O(N))",
-  "weaknesses": [
-    {
-      "type": "Name of weakness category",
-      "severity": "Low | Medium | High",
-      "description": "Short explanation of the vulnerable line or performance risk"
-    }
-  ]
-}
-
-Note: Limit explanations. Return only valid, compilable JSON.`;
-
-    const response = await ai.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
-    });
-
-    const report = JSON.parse(cleanJSONString(response.choices[0]?.message?.content || ""));
-    const totalScore = (report.correctnessScore || 0) + (report.efficiencyScore || 0) + (report.robustnessScore || 0);
-
-    res.json({
-      correctnessScore: report.correctnessScore || 40,
-      efficiencyScore: report.efficiencyScore || 20,
-      robustnessScore: report.robustnessScore || 20,
-      totalScore: totalScore || 80,
-      timeComplexity: report.timeComplexity || "O(N log N)",
-      spaceComplexity: report.spaceComplexity || "O(N)",
-      weaknesses: report.weaknesses || []
-    });
+    const report = await OpponentEngine.analyzePlayerCode(
+      ai, code, problemTitle, language, archetype, difficulty || "Intermediate"
+    );
+    res.json({ ...report, opponent: archetype });
   } catch (error) {
-    console.error("GROQ analyzer failed, routing mock analysis:", error);
+    console.error("Opponent analyzer failed, routing mock analysis:", error);
     res.json({
       correctnessScore: 45,
       efficiencyScore: 18,
@@ -521,15 +495,55 @@ Note: Limit explanations. Return only valid, compilable JSON.`;
       totalScore: 84,
       timeComplexity: "O(N log N)",
       spaceComplexity: "O(N)",
+      opponent: archetype,
       weaknesses: [
         {
           type: "Timeout Risk",
           severity: "Medium",
-          description: "Lack of pre-computation caching might invoke linear scan timeouts."
+          description: "Lack of pre-computation caching might invoke linear scan timeouts.",
+          confidenceScore: 78
         }
       ]
     });
   }
+});
+
+/**
+ * API Endpoint: Generate Opponent's Solution
+ */
+app.post("/api/opponent/generate", async (req: Request, res: Response) => {
+  const { problemTitle, problemDescription, language, difficulty } = req.body;
+  const archetype = getArchetypeForDifficulty(difficulty || "Intermediate");
+  
+  if (!ai) {
+    return res.json({
+      opponent: archetype,
+      code: "// Mock opponent fallback code",
+      intendedFlaws: []
+    });
+  }
+
+  const { code, intendedFlaws } = await OpponentEngine.generateSolution(
+    ai, problemTitle, problemDescription, language, archetype, difficulty || "Intermediate"
+  );
+  
+  res.json({ opponent: archetype, code, intendedFlaws });
+});
+
+/**
+ * API Endpoint: Generate Post-Match Feedback
+ */
+app.post("/api/opponent/feedback", async (req: Request, res: Response) => {
+  const { playerStats } = req.body;
+  if (!ai) {
+    return res.json({
+      didWell: "Solid overall performance.",
+      missed: "Could improve efficiency.",
+      suggestedLearningTopic: "Algorithm Optimization"
+    });
+  }
+  const feedback = await MatchFeedback.generateFeedback(ai, playerStats);
+  res.json(feedback);
 });
 
 /**
@@ -578,48 +592,49 @@ Return a short, immersive response. No markdown. MAX 2 sentences.`;
 /**
  * API Endpoint: Breaker Finding/Exploit Validator.
  * AI acts as a sandbox emulator and verifier! It evaluates if the user's report is a legitimate threat.
+ * Includes reasoning bonus and duplicate finding detection.
  */
 app.post("/api/validate-finding", async (req: Request, res: Response) => {
   const {
     findingTitle,
-    category,
+    findingType,
     description,
+    reasoningText,
+    confidenceLevel,
     exampleInput,
     expectedOutput,
     observedOutput,
     opponentCode,
-    language
+    language,
+    previousFindings
   } = req.body;
 
-  if (!opponentCode || !exampleInput) {
-    return res.status(400).json({ error: "Missing required compromise reports details" });
+  if (!opponentCode || !exampleInput || !reasoningText) {
+    return res.status(400).json({ error: "Missing required compromise reports details (evidence/reasoning)." });
   }
 
   if (!ai) {
     // Mock validator: validates if user provided reasonable inputs
-    const looksValid = exampleInput.trim().length > 0 && description.trim().length > 10;
+    const looksValid = exampleInput.trim().length > 0 && reasoningText.trim().length > 10;
     if (looksValid) {
-      const severities = {
-        minor_edge_case: 5,
-        logic_bug: 15,
-        timeout: 15,
-        memory_issue: 20,
-        security_concern: 25,
-        critical_failure: 30
-      };
-
-      const score = severities[category as keyof typeof severities] || 15;
-
       return res.json({
         isValid: true,
-        score,
+        severity: "Moderate",
+        confidence: 85,
+        score: 10,
+        reasoningBonus: 2,
+        isDuplicate: false,
         reason: "[DEV MOCK VALIDATION SUCCESS] Your reported exploit successfully triggered the target boundary anomaly! The logic was verified as a genuine vulnerability."
       });
     } else {
       return res.json({
         isValid: false,
+        severity: "Minor",
+        confidence: 100,
         score: 0,
-        reason: "The submitted exploit description or inputs were too short or failed to produce an observable performance anomaly on the opponent solution."
+        reasoningBonus: 0,
+        isDuplicate: false,
+        reason: "The submitted exploit description, inputs, or reasoning were too short or failed to produce an observable performance anomaly on the opponent solution."
       });
     }
   }
@@ -632,10 +647,15 @@ Opponent Code Language: ${language}
 Opponent Code:
 ${opponentCode}
 
+Previous Findings Submitted by Player:
+${JSON.stringify(previousFindings || [])}
+
 Breaker's Claim:
 - Title: ${findingTitle}
-- Target Violation Category: ${category}
+- Target Violation Category: ${findingType}
 - Exploit Spec Detail: ${description}
+- Reasoning: ${reasoningText}
+- Confidence Level: ${confidenceLevel}
 - Example Test Input: ${exampleInput}
 - Expected Correct Behavior: ${expectedOutput}
 - Observed Anomaly output/state: ${observedOutput}
@@ -643,11 +663,17 @@ Breaker's Claim:
 You must evaluate whether the attacker's claim is valid, logical, and structurally correct.
 Does this specific Example Test Input (${exampleInput}) indeed breach correctness, trigger infinite loop/timeout, or crash the Opponent's codebase?
 
+Evaluate the reasoning quality. Excellent reasoning gets up to 5 bonus points. Poor reasoning gets 0.
+Check if this finding is fundamentally the SAME root cause as any of the "Previous Findings Submitted by Player". If so, mark "isDuplicate" as true.
+
 Return a strict, clear JSON object format matching this structure:
 {
   "isValid": boolean,
-  "severity": "minor_edge_case" | "logic_bug" | "timeout" | "memory_issue" | "security_concern" | "critical_failure",
-  "score": number, // Points allocation: minor_edge_case: 5, logic_bug: 15, timeout: 15, memory_issue: 20, security_concern: 25, critical_failure: 30
+  "severity": "Minor" | "Moderate" | "High" | "Critical",
+  "score": number, // Points allocation: Minor: 5, Moderate: 10, High: 15, Critical: 20-30
+  "reasoningBonus": number, // 0 to 5 based on how well they explained the root cause
+  "confidence": number, // 0 to 100 on how confident you are in your own validation
+  "isDuplicate": boolean, // true if this is identical root cause to previous findings
   "reason": "Detailed expert technical reasoning explaining whether the input breaks the code and maps to the selected category."
 }
 
@@ -662,16 +688,22 @@ Ensure the output is parseable JSON with no explanation or wrapping outside the 
     const result = JSON.parse(cleanJSONString(response.choices[0]?.message?.content || ""));
     res.json({
       isValid: result.isValid === undefined ? true : result.isValid,
-      severity: result.severity || category || "logic_bug",
-      score: result.score || 15,
+      severity: result.severity || "Moderate",
+      score: result.score || 10,
+      reasoningBonus: result.reasoningBonus || 0,
+      confidence: result.confidence || 90,
+      isDuplicate: result.isDuplicate || false,
       reason: result.reason || "The vulnerability was successfully replicated under simulated runtime conditions."
     });
   } catch (error) {
     console.error("GROQ validator failed:", error);
     res.json({
       isValid: true,
-      severity: category || "logic_bug",
-      score: 15,
+      severity: "Moderate",
+      score: 10,
+      reasoningBonus: 0,
+      confidence: 80,
+      isDuplicate: false,
       reason: "Simulation compiled successfully. The exploit is acknowledged as plausible under deep recursive calls."
     });
   }

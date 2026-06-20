@@ -53,11 +53,14 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
 
   // Step 6 Breaker states
   const [findingTitle, setFindingTitle] = useState("");
-  const [findingCategory, setFindingCategory] = useState<"logic_bug" | "timeout" | "memory_issue" | "security_concern" | "critical_failure" | "minor_edge_case">("logic_bug");
+  const [findingType, setFindingType] = useState<string>("Logic Bug");
   const [findingDesc, setFindingDesc] = useState("");
+  const [findingReasoning, setFindingReasoning] = useState("");
+  const [findingConfidence, setFindingConfidence] = useState<"Low" | "Medium" | "High">("Medium");
   const [exampleInput, setExampleInput] = useState("");
   const [expectedOutput, setExpectedOutput] = useState("");
   const [observedOutput, setObservedOutput] = useState("");
+  const [invalidFindingCount, setInvalidFindingCount] = useState<number>(0);
   const [findingsHistory, setFindingsHistory] = useState<Finding[]>([]);
   const [breakerHints, setBreakerHints] = useState<string[]>([]);
   const [breakerHintLevel, setBreakerHintLevel] = useState<number>(0);
@@ -73,6 +76,10 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
     finalBuilder: number;
     finalBreaker: number;
   } | null>(null);
+
+  // Opponent Profile & Feedback
+  const [opponentProfile, setOpponentProfile] = useState<any>(null);
+  const [matchFeedback, setMatchFeedback] = useState<any>(null);
 
   // Helper for matchmaking execution animation
   const handleStartMatchmaking = async () => {
@@ -198,11 +205,13 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
           code: userCode,
           language: preferredLang,
           problemId: problem?.id,
-          problemTitle: problem?.title
+          problemTitle: problem?.title,
+          difficulty: problem?.difficulty
         })
       });
       const data = await resp.json();
       setBuilderAnalysis(data);
+      if (data.opponent) setOpponentProfile(data.opponent);
       setStep(4);
     } catch (err) {
       console.error(err);
@@ -225,26 +234,48 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
   };
 
   // Swap codes step transition
-  const handleProceedCodeSwap = () => {
+  const handleProceedCodeSwap = async () => {
     setLoading(true);
-    // Prefill simulated opponent solution based on match problem
-    const sampleOpponent = SAMPLE_OPPONENT_CODES[preferredLang] || SAMPLE_OPPONENT_CODES["python"];
-    setOpponentCode(sampleOpponent);
+    try {
+      const resp = await fetch("/api/opponent/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          problemTitle: problem?.title,
+          problemDescription: problem?.description,
+          language: preferredLang,
+          difficulty: problem?.difficulty
+        })
+      });
+      const data = await resp.json();
+      
+      let finalCode = data.code;
+      if (!finalCode || finalCode.includes("failed to generate code") || finalCode.includes("Fallback code due to error")) {
+        finalCode = SAMPLE_OPPONENT_CODES[preferredLang] || SAMPLE_OPPONENT_CODES["python"];
+      }
+      setOpponentCode(finalCode);
+      
+      if (data.opponent) setOpponentProfile(data.opponent);
+      
+      setOpponentAnalysis({
+        correctnessScore: 45,
+        efficiencyScore: 18,
+        robustnessScore: 15,
+        totalScore: 78,
+        timeComplexity: preferredLang === "javascript" ? "O(N^2)" : "O(N log N)",
+        spaceComplexity: "O(N)"
+      });
 
-    // Simulated Opponent Builder Profile scores
-    setOpponentAnalysis({
-      correctnessScore: 45,
-      efficiencyScore: 18,
-      robustnessScore: 15,
-      totalScore: 78,
-      timeComplexity: preferredLang === "javascript" ? "O(N^2)" : "O(N log N)",
-      spaceComplexity: "O(N)"
-    });
-
-    setTimeout(() => {
+      setTimeout(() => {
+        setLoading(false);
+        setStep(5);
+      }, 1500);
+    } catch (err) {
+      console.error(err);
+      setOpponentCode("// Fallback code");
       setLoading(false);
       setStep(5);
-    }, 1500);
+    }
   };
 
   // Launch breaker hunt interface
@@ -282,7 +313,7 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
   // File exploit finding & Validate live via Gemini
   const handlePublishFinding = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!findingTitle || !findingDesc || !exampleInput) return;
+    if (!findingTitle || !findingDesc || !exampleInput || !findingReasoning) return;
     setLoading(true);
 
     try {
@@ -291,13 +322,21 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           findingTitle,
-          category: findingCategory,
+          findingType,
           description: findingDesc,
+          reasoningText: findingReasoning,
+          confidenceLevel: findingConfidence,
           exampleInput,
           expectedOutput,
           observedOutput,
           opponentCode,
-          language: preferredLang
+          language: preferredLang,
+          previousFindings: findingsHistory.map(f => ({
+            title: f.title,
+            type: f.findingType,
+            description: f.description,
+            reasoning: f.reasoningText
+          }))
         })
       });
 
@@ -306,25 +345,37 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
       const newFinding: Finding = {
         id: "finding-" + Date.now(),
         title: findingTitle,
-        category: findingCategory,
+        category: "logic_bug", // Legacy compatibility if needed
+        findingType: findingType,
         description: findingDesc,
+        reasoningText: findingReasoning,
+        confidenceLevel: findingConfidence,
         exampleInput,
         expectedOutput,
         observedOutput,
         isValid: data.isValid,
+        isDuplicate: data.isDuplicate,
         scoreAwarded: data.score || 0,
+        reasoningBonus: data.reasoningBonus || 0,
+        severity: data.severity || "Moderate",
         reasoning: data.reason || "The exploit compiled with trace differences.",
         timestamp: new Date().toLocaleTimeString()
       };
+
+      if (!data.isValid) {
+        setInvalidFindingCount(prev => prev + 1);
+      }
 
       setFindingsHistory(prev => [newFinding, ...prev]);
 
       // Reset form fields
       setFindingTitle("");
       setFindingDesc("");
+      setFindingReasoning("");
       setExampleInput("");
       setExpectedOutput("");
       setObservedOutput("");
+      setFindingConfidence("Medium");
 
       setStep(7);
     } catch (err) {
@@ -335,34 +386,79 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
   };
 
   // Compute final combat scores
-  const handleCalculateCalculations = () => {
-    const totalPointsFromHints = hints.reduce((acc, h) => acc + h.penalty, 0);
-    const baseBuilder = Math.max(0, (builderAnalysis?.totalScore || 75) - totalPointsFromHints);
+  const handleCalculateCalculations = async () => {
+    setLoading(true);
+    try {
+      const totalPointsFromHints = hints.reduce((acc, h) => acc + h.penalty, 0);
+      const baseBuilder = Math.max(0, (builderAnalysis?.totalScore || 75) - totalPointsFromHints);
 
-    // Sum valid exploit scores we flagged
-    const stolenPoints = findingsHistory
-      .filter(f => f.isValid)
-      .reduce((acc, f) => acc + (f.scoreAwarded || 0), 0);
+      // Sum valid exploit scores we flagged
+      const stolenPoints = findingsHistory
+        .filter(f => f.isValid && !f.isDuplicate)
+        .reduce((acc, f) => acc + (f.scoreAwarded || 0), 0);
+        
+      const reasoningBonusTotal = findingsHistory
+        .filter(f => f.isValid && !f.isDuplicate)
+        .reduce((acc, f) => acc + (f.reasoningBonus || 0), 0);
 
-    // Premium logic attributes matching criteria
-    const precisionBonus = findingsHistory.length > 0 && findingsHistory.every(f => f.isValid) ? 15 : 0;
-    const defenseBonus = (builderAnalysis?.weaknesses.length || 0) === 0 ? 20 : 5;
-    const spamPenalty = findingsHistory.filter(f => !f.isValid).length * 10;
+      // False Positive Penalty
+      let falsePositivePenalty = 0;
+      for (let i = 1; i <= invalidFindingCount; i++) {
+        falsePositivePenalty += i * 2;
+      }
 
-    const finalBuilder = Math.max(0, baseBuilder - spamPenalty);
-    const finalBreaker = stolenPoints + precisionBonus + defenseBonus;
+      // Precision Bonus
+      const totalSubmitted = findingsHistory.length;
+      const validFindingsCount = findingsHistory.filter(f => f.isValid).length;
+      const precisionPercent = totalSubmitted > 0 ? (validFindingsCount / totalSubmitted) * 100 : 0;
+      let precisionBonus = 0;
+      if (totalSubmitted > 0) {
+        if (precisionPercent >= 70) precisionBonus = 10;
+        else if (precisionPercent < 30) precisionBonus = -10;
+      }
 
-    setPointsBreakdown({
-      baseBuilder,
-      flagsStolen: stolenPoints,
-      defenceBonus: defenseBonus,
-      precisionBonus,
-      spamPenalty,
-      finalBuilder,
-      finalBreaker
-    });
+      const defenseBonus = (builderAnalysis?.weaknesses.length || 0) === 0 ? 20 : 5;
 
-    setStep(8);
+      const finalBuilder = Math.max(0, baseBuilder);
+      const finalBreaker = Math.max(0, stolenPoints + precisionBonus + defenseBonus + reasoningBonusTotal - falsePositivePenalty);
+
+      setPointsBreakdown({
+        baseBuilder,
+        flagsStolen: stolenPoints,
+        defenceBonus: defenseBonus,
+        precisionBonus,
+        spamPenalty: falsePositivePenalty,
+        falsePositivePenalty,
+        reasoningBonusTotal,
+        finalBuilder,
+        finalBreaker
+      });
+
+      // Fetch match feedback
+      const feedbackResp = await fetch("/api/opponent/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerStats: {
+            problemTitle: problem?.title,
+            builderScore: finalBuilder,
+            breakerScore: finalBreaker,
+            opponentName: opponentProfile?.name || "OPPONENT",
+            playerWeaknessesFoundByOpponent: builderAnalysis?.weaknesses || [],
+            opponentWeaknessesFoundByPlayer: findingsHistory.filter(f => f.isValid && !f.isDuplicate)
+          }
+        })
+      });
+      const feedbackData = await feedbackResp.json();
+      setMatchFeedback(feedbackData);
+      
+      setStep(8);
+    } catch (err) {
+      console.error(err);
+      setStep(8);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Synchronize rating update to dashboard context
@@ -371,10 +467,14 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
     const scoreDiff = pointsBreakdown.finalBreaker - (100 - pointsBreakdown.finalBuilder);
     const scoreOutcome = scoreDiff > 0 ? "VICTORY" : "DEFEAT";
 
+    // Adding Analyst Rating metric based on precision + reasoning
+    const analystRatingUpdate = Math.round((pointsBreakdown.precisionBonus + pointsBreakdown.reasoningBonusTotal - pointsBreakdown.falsePositivePenalty) * 0.5);
+
     onMatchComplete(
       builderRating + Math.round(scoreDiff * 0.2),
       breakerRating + Math.round(pointsBreakdown.finalBreaker * 0.3),
-      scoreOutcome
+      scoreOutcome,
+      // Pass analyst update to parent if supported (assuming onMatchComplete can handle it in future iterations)
     );
   };
 
@@ -843,7 +943,9 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
                           {weak.severity}
                         </span>
                         <div>
-                          <strong className="text-xs font-bold text-zinc-200">{weak.type}</strong>
+                          <strong className="text-xs font-bold text-zinc-200">
+                            {weak.type} {weak.confidenceScore && <span className="text-cyan-400 ml-2">[{weak.confidenceScore}% Confidence]</span>}
+                          </strong>
                           <p className="text-xs text-zinc-400 mt-1">{weak.description}</p>
                         </div>
                       </div>
@@ -902,6 +1004,12 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
                 <div className="text-4xl font-extrabold font-mono text-cyan-400 mt-1 mb-2">
                   {opponentAnalysis.totalScore}
                 </div>
+                {opponentProfile && (
+                  <div className="text-[10px] text-zinc-300 font-mono bg-[#111111] p-2 rounded mb-2 border border-zinc-800">
+                    <span className="font-bold text-cyan-400">ARCHETYPE: {opponentProfile.name}</span><br />
+                    Traits: {opponentProfile.traits.join(", ")}
+                  </div>
+                )}
                 <p className="text-[11px] text-zinc-400 font-mono">// Time complexity verified at: {opponentAnalysis.timeComplexity}.</p>
               </div>
             </div>
@@ -941,18 +1049,22 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider block mb-1">Category</label>
+                    <label className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider block mb-1">Finding Type</label>
                     <select
-                      value={findingCategory}
-                      onChange={(e: any) => setFindingCategory(e.target.value)}
+                      value={findingType}
+                      onChange={(e: any) => setFindingType(e.target.value)}
                       className="w-full bg-[#161616] border border-[#2A2A2A] rounded-lg px-2 py-2 text-[11px] text-white focus:outline-none h-[34px]"
                     >
-                      <option value="minor_edge_case">Minor Edge Case (+5)</option>
-                      <option value="logic_bug">Logic Bug (+15)</option>
-                      <option value="timeout">Timeout / Infinite Loop (+15)</option>
-                      <option value="memory_issue">Memory Growth Leak (+20)</option>
-                      <option value="security_concern">Security Threat (+25)</option>
-                      <option value="critical_failure">Critical Failure (+30)</option>
+                      <option value="Logic Bug">Logic Bug</option>
+                      <option value="Edge Case Failure">Edge Case Failure</option>
+                      <option value="Time Complexity Issue">Time Complexity Issue</option>
+                      <option value="Space Complexity Issue">Space Complexity Issue</option>
+                      <option value="Recursion Risk">Recursion Risk</option>
+                      <option value="Memory Issue">Memory Issue</option>
+                      <option value="Overflow Risk">Overflow Risk</option>
+                      <option value="Input Validation Issue">Input Validation Issue</option>
+                      <option value="Security Concern">Security Concern</option>
+                      <option value="Other">Other</option>
                     </select>
                   </div>
 
@@ -982,8 +1094,34 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
                     value={findingDesc}
                     onChange={(e) => setFindingDesc(e.target.value)}
                     placeholder="Provide technical evaluation of why this opponent implementation crashes under bounds..."
-                    className="w-full bg-[#161616] border border-[#2A2A2A] rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500 resize-none h-[80px]"
+                    className="w-full bg-[#161616] border border-[#2A2A2A] rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500 resize-none h-[60px]"
                   />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider block mb-1">Reasoning (Why is this an issue?)</label>
+                  <textarea
+                    required
+                    value={findingReasoning}
+                    onChange={(e) => setFindingReasoning(e.target.value)}
+                    placeholder="Explain the root cause and exactly how the defect breaks the logic..."
+                    className="w-full bg-[#161616] border border-[#2A2A2A] rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500 resize-none h-[60px]"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="col-span-2">
+                    <label className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider block mb-1">Confidence Level</label>
+                    <select
+                      value={findingConfidence}
+                      onChange={(e: any) => setFindingConfidence(e.target.value)}
+                      className="w-full bg-[#161616] border border-[#2A2A2A] rounded-lg px-2 py-2 text-[11px] text-white focus:outline-none h-[34px]"
+                    >
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -1116,11 +1254,16 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
 
                     <div className="flex items-center gap-2">
                       <span className="px-2 py-0.5 rounded bg-zinc-800 text-[9px] font-mono font-semibold text-zinc-500 uppercase">
-                        {find.category.replace("_", " ")}
+                        {find.findingType} | {find.severity}
                       </span>
-                      {find.isValid ? (
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 font-mono">
+                      {find.isDuplicate ? (
+                        <span className="px-2 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/20 text-[10px] font-bold text-yellow-500 font-mono">
+                          DUPLICATE REPORT (0 pts)
+                        </span>
+                      ) : find.isValid ? (
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 font-mono flex items-center gap-1">
                           VALID EXPLOIT (+{find.scoreAwarded} pts)
+                          {find.reasoningBonus ? <span className="text-cyan-400">+{find.reasoningBonus} REASONING</span> : null}
                         </span>
                       ) : (
                         <span className="px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-[10px] font-bold text-red-400 font-mono">
@@ -1214,8 +1357,18 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
                     <span className="text-emerald-400">+{pointsBreakdown.defenceBonus} Pts</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Bug Precision Multiplier:</span>
-                    <span className="text-emerald-400">+{pointsBreakdown.precisionBonus} Pts</span>
+                    <span>Bug Precision Score:</span>
+                    <span className={pointsBreakdown.precisionBonus > 0 ? "text-emerald-400" : pointsBreakdown.precisionBonus < 0 ? "text-red-400" : "text-zinc-500"}>
+                      {pointsBreakdown.precisionBonus > 0 ? "+" : ""}{pointsBreakdown.precisionBonus} Pts
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Reasoning Quality Bonus:</span>
+                    <span className="text-cyan-400">+{pointsBreakdown.reasoningBonusTotal} Pts</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>False Positive Penalty:</span>
+                    <span className="text-red-400">-{pointsBreakdown.falsePositivePenalty} Pts</span>
                   </div>
                   <div className="flex justify-between pt-2 border-t border-[#2A2A2A] font-bold text-white">
                     <span>Final Hack Points:</span>
@@ -1224,6 +1377,30 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
                 </div>
               </div>
             </div>
+
+            {matchFeedback && (
+              <div className="mb-8 p-6 rounded-xl border border-zinc-800 bg-[#151515] text-left shadow-[0_4px_12px_rgba(0,0,0,0.5)]">
+                <h3 className="text-xs font-bold text-white mb-4 uppercase tracking-widest border-b border-zinc-800 pb-2 font-mono">
+                  <span className="text-purple-400">///</span> COACH MATCH FEEDBACK
+                </h3>
+                <div className="space-y-4 text-xs font-mono">
+                  <div>
+                    <span className="text-emerald-400 font-bold block mb-1">What You Did Well:</span>
+                    <span className="text-zinc-300 leading-relaxed">{matchFeedback.didWell}</span>
+                  </div>
+                  <div>
+                    <span className="text-red-400 font-bold block mb-1">What You Missed:</span>
+                    <span className="text-zinc-300 leading-relaxed">{matchFeedback.missed}</span>
+                  </div>
+                  <div className="pt-3 mt-1 border-t border-zinc-800/50">
+                    <span className="text-cyan-400 font-bold block mb-2">Suggested Learning Topic:</span>
+                    <span className="text-white bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-md inline-block font-bold">
+                      {matchFeedback.suggestedLearningTopic}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="p-4 bg-zinc-900 border border-[#222222] rounded-xl text-center mb-8 font-mono">
               <span className="text-[10px] text-zinc-500 uppercase block font-bold">MATCHMAKING LP OUTCOME</span>
