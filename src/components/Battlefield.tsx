@@ -102,7 +102,8 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
           body: JSON.stringify({
             difficulty: difficultyTier,
             builderRating: builderRating,
-            breakerRating: breakerRating
+            breakerRating: breakerRating,
+            preferredLang: preferredLang
           })
         });
 
@@ -131,16 +132,29 @@ export default function Battlefield({ userStats, onMatchComplete, onExit }: Batt
     setLiveLog("Running environment: AAA Dynamic Container [v3.1.2]\nSandbox initial state: Operational.");
   };
 
-  // Run mock code execution
-  const handleRunTestCases = () => {
+  // Run code execution via AI judge endpoint
+  const handleRunTestCases = async () => {
     setLiveLog("Executing code check against core verification tests...");
-    setTimeout(() => {
-      if (userCode.includes("TODO") || userCode.trim().length < 80) {
-        setLiveLog(`stdout: FAIL\n[ERROR]: Missing algorithmic implementation.\nEnsure logic covers constraints inside the verified runner.`);
-      } else {
-        setLiveLog(`stdout: SUCCESS\nPass 4/4 Base Test Cases!\nExecution finished in 18ms\nMemory consumed: 12MB`);
-      }
-    }, 800);
+    setLoading(true);
+    try {
+      const resp = await fetch("/api/run-tests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: userCode,
+          language: preferredLang,
+          problemTitle: problem?.title,
+          examples: problem?.examples
+        })
+      });
+      const data = await resp.json();
+      setLiveLog(data.output || "stdout: Execution completed.");
+    } catch (err) {
+      console.error(err);
+      setLiveLog("stdout: ERROR\n[ERROR]: Network or execution failure.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Request Level Hints

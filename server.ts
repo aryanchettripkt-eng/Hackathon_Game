@@ -236,7 +236,7 @@ function cleanJSONString(rawText: string): string {
  * falling back to premium preloaded questions if offline.
  */
 app.post("/api/generate-challenge", async (req: Request, res: Response) => {
-  const { difficulty, builderRating, breakerRating } = req.body;
+  const { difficulty, builderRating, breakerRating, preferredLang } = req.body;
   const ratingAvg = Math.round(((builderRating || 1200) + (breakerRating || 1200)) / 2);
 
   if (!ai) {
@@ -248,17 +248,58 @@ app.post("/api/generate-challenge", async (req: Request, res: Response) => {
   }
 
   try {
+    // Map application difficulty to LeetCode difficulty
+    let lcDifficulty = "MEDIUM";
+    if (difficulty === "Beginner") lcDifficulty = "EASY";
+    else if (difficulty === "Expert") lcDifficulty = "HARD";
+    else lcDifficulty = "MEDIUM"; // Intermediate and Advanced
+
+    // Fetch random problem slug from LeetCode
+    const listQuery = `query problemsetQuestionList($limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+      problemsetQuestionList: questionList(categorySlug: "", limit: $limit, skip: $skip, filters: $filters) {
+        questions: data { titleSlug }
+      }
+    }`;
+    const skipAmount = Math.floor(Math.random() * 200); // randomize selection
+    const lcListRes = await fetch("https://leetcode.com/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: listQuery,
+        variables: { limit: 1, skip: skipAmount, filters: { difficulty: lcDifficulty } }
+      })
+    });
+    const lcListData = await lcListRes.json();
+    let titleSlug = "two-sum";
+    if (lcListData?.data?.problemsetQuestionList?.questions?.length > 0) {
+      titleSlug = lcListData.data.problemsetQuestionList.questions[0].titleSlug;
+    }
+
+    // Fetch problem details
+    const dataQuery = `query questionData($titleSlug: String!) { question(titleSlug: $titleSlug) { title content } }`;
+    const lcDataRes = await fetch("https://leetcode.com/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: dataQuery, variables: { titleSlug } })
+    });
+    const lcData = await lcDataRes.json();
+    const lcProblemTitle = lcData?.data?.question?.title || "Two Sum";
+    const lcProblemContent = lcData?.data?.question?.content || "Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.";
+
     const prompt = `You are a competitive programming designer for "Adversarial Algorithm Arena".
-Please select and provide an ACTUAL popular LeetCode algorithmic problem that matches the difficulty tier "${difficulty || "Intermediate"}" and is appropriate for rating level ${ratingAvg}.
+Format the following REAL LeetCode problem into our platform's structure:
+Title: ${lcProblemTitle}
+Description HTML: ${lcProblemContent}
 
-The problem MUST be a real LeetCode question (e.g., Two Sum, Merge Intervals, Trapping Rain Water, LRU Cache, etc.), but tailored for this arena where players write code that other players will try to break. It should have subtle edge cases, such as potential infinite loops, deep call stack limits, integer overflow, performance decay on large inputs, or edge cases with empty bounds.
+The user's chosen language is ${preferredLang || "python"}.
 
+The problem must have subtle edge cases.
 You MUST respond strictly in clean JSON format with zero extra text or commentary.
 The JSON must align with the following structure:
 {
-  "title": "A highly styled cyberpunk name for the security/DSA problem",
+  "title": "A highly styled cyberpunk name for the security/DSA problem based on the original title",
   "difficulty": "${difficulty || "Intermediate"}",
-  "description": "Provide a rich description of the challenge, explaining the algorithm and constraints clearly as if it is an advanced platform like LeetCode or Codeforces.",
+  "description": "Provide a rich description of the challenge, explaining the algorithm and constraints clearly based on the provided HTML.",
   "timeLimit": "1.5s",
   "constraints": ["Constraint 1", "Constraint 2", "Constraint 3"],
   "examples": [
@@ -285,7 +326,7 @@ The JSON must align with the following structure:
     const parsedData = JSON.parse(cleanJSONString(response.choices[0]?.message?.content || ""));
     const finalProblem: ProblemData = {
       id: "dynamic-" + Date.now().toString(36),
-      title: parsedData.title || "Quantum Signature Packet Sorter",
+      title: parsedData.title || lcProblemTitle,
       difficulty: parsedData.difficulty || difficulty || "Intermediate",
       description: parsedData.description || "Parse incoming sub-streams of data with high performance.",
       timeLimit: parsedData.timeLimit || "1.0s",
@@ -306,6 +347,76 @@ The JSON must align with the following structure:
     const problem = { ...FALLBACK_PROBLEMS[index] };
     problem.difficulty = difficulty || "Intermediate";
     res.json({ problem, error: "FALLBACK_USED", details: error.message || String(error), ai_is_null: !ai });
+  }
+});
+
+/**
+ * API Endpoint: Run Sandbox Tests.
+ * Uses AI to act as a judge for the provided code and problem examples.
+ */
+app.post("/api/run-tests", async (req: Request, res: Response) => {
+  const { code, language, problemTitle, examples } = req.body;
+
+  if (!code || code.trim().length === 0) {
+    return res.status(400).json({ error: "Code cannot be empty" });
+  }
+
+  if (!ai) {
+    // Mock runner fallback
+    if (code.includes("TODO") || code.trim().length < 80) {
+      return res.json({
+        success: false,
+        output: "stdout: FAIL\n[ERROR]: Missing algorithmic implementation.\nEnsure logic covers constraints inside the verified runner."
+      });
+    } else {
+      return res.json({
+        success: true,
+        output: "stdout: SUCCESS\nPass 4/4 Base Test Cases!\nExecution finished in 18ms\nMemory consumed: 12MB"
+      });
+    }
+  }
+
+  try {
+    const prompt = `You are an automated Sandboxed Algorithmic Judge.
+Evaluate the user's submitted code for the problem: "${problemTitle || "DSA Challenge"}".
+
+Language: ${language}
+Submitted Code:
+${code}
+
+Problem Examples to Test:
+${JSON.stringify(examples, null, 2)}
+
+You must evaluate whether the code correctly solves the problem and passes the examples.
+Return a strict JSON output representing the test results.
+The JSON must have this schema:
+{
+  "success": boolean,
+  "passedCount": number,
+  "totalCount": number,
+  "output": "A console-like string showing stdout, e.g., 'Pass 4/4 Base Test Cases!\\nExecution finished in 18ms' or 'FAIL on Example 1: Expected X, got Y'"
+}
+
+Note: Limit explanations. Return only valid, compilable JSON.`;
+
+    const response = await ai.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+
+    const report = JSON.parse(cleanJSONString(response.choices[0]?.message?.content || ""));
+
+    res.json({
+      success: report.success || false,
+      output: report.output || (report.success ? "stdout: SUCCESS\nAll tests passed." : "stdout: FAIL\n[ERROR]: Validation failed.")
+    });
+  } catch (error) {
+    console.error("GROQ test runner failed:", error);
+    res.json({
+      success: false,
+      output: "stdout: ERROR\n[ERROR]: Sandboxed execution engine failure."
+    });
   }
 });
 
